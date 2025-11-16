@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "connectwell.fullname" . | default (printf "%s" .Chart.Name) }}-config
+data:
+  # Non-sensitive default env values
+  DJANGO_SETTINGS_MODULE: "{{ .Values.env.DJANGO_SETTINGS_MODULE }}"
+  DEBUG: "{{ .Values.env.DEBUG }}"

@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connectwell — Wallet</title>
+  <link rel="stylesheet" href="/demo/style.css">
+  <style>
+    .wrap{max-width:820px;margin:28px auto;padding:18px}
+    .card{padding:18px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)}
+    .muted{color:var(--muted)}
+    button{padding:8px 12px;border-radius:8px;background:linear-gradient(90deg,var(--accent),#4ade80);border:none;color:#062018;cursor:pointer}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Wallet</h2>
+      <div><a href="/lobby.html" style="color:#6ee7b7">Back to Lobby</a></div>
+    </header>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div class="muted">Balance</div>
+          <div id="coins" style="font-weight:700;font-size:20px">—</div>
+        </div>
+        <div>
+          <label class="muted">Buy coins</label>
+          <select id="pack">
+            <option value="starter">Starter — 25 coins</option>
+            <option value="chatter">Chatter — 60 coins</option>
+            <option value="social">Social — 140 coins</option>
+          </select>
+          <button id="buyBtn">Buy</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px" class="muted">Recent transactions</div>
+      <table id="txTable"><thead><tr><th>When</th><th>Amount</th><th>Reason</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <script>
+    async function refresh(){
+      const token = localStorage.getItem('access_token');
+      if(!token){ document.getElementById('coins').textContent='(login)'; return; }
+      try{
+        const r = await fetch('/api/v1/wallet', { headers:{ 'Authorization':'Bearer '+token }});
+        if(!r.ok) return;
+        const j = await r.json();
+        document.getElementById('coins').textContent = (j.coins||0) + ' coins';
+        const tbody = document.querySelector('#txTable tbody'); tbody.innerHTML = '';
+        (j.transactions||[]).forEach(t=>{ const tr=document.createElement('tr'); tr.innerHTML = `<td>${t.created_at}</td><td>${t.amount}</td><td>${t.reason}</td>`; tbody.appendChild(tr); })
+      }catch(e){ console.error(e); }
+    }
+    refresh();
+
+    document.getElementById('buyBtn').onclick = async ()=>{
+      const pack = document.getElementById('pack').value;
+      const token = localStorage.getItem('access_token');
+      const headers = {'Content-Type':'application/json'}; if(token) headers['Authorization']='Bearer '+token;
+      try{
+        const r = await fetch('/api/v1/coins/purchase', { method:'POST', headers, body: JSON.stringify({ pack_id: pack }) });
+        const j = await r.json();
+        if(r.status===200 && j.checkout_url){
+          // open checkout in new tab and poll
+          window.open(j.checkout_url, '_blank');
+          const poll = async ()=>{ try{ const s = await fetch('/api/v1/coins/order/' + j.order_id + '/status'); const b = await s.json(); if(b && b.paid){ alert('Purchase complete'); refresh(); } else setTimeout(poll,2000); }catch(e){ setTimeout(poll,2000); } };
+          setTimeout(poll,2000);
+        } else {
+          alert(j.message || 'Failed to create order');
+        }
+      }catch(e){ alert('Buy failed'); }
+    };
+  </script>
+</body>
+</html>

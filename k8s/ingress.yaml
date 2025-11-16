@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: connectwell-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: connectwell-web
+            port:
+              number: 80
+  # TLS block example (requires secret/Let's Encrypt)
+  # tls:
+  # - hosts: ["example.com"]
+  #   secretName: connectwell-tls

@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connectwell-web
+  labels:
+    app: connectwell
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: connectwell
+  template:
+    metadata:
+      labels:
+        app: connectwell
+    spec:
+      containers:
+      - name: connectwell
+        # Replace with your image registry/tag
+        image: ${REGISTRY:-connectwell-backend}:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DJANGO_DEBUG
+          value: "0"
+        - name: DJANGO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: connectwell-secrets
+              key: DJANGO_SECRET_KEY
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: connectwell-secrets
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: connectwell-secrets
+              key: REDIS_URL
+        - name: YOCO_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: connectwell-secrets
+              key: YOCO_WEBHOOK_SECRET
+        - name: TURN_URL
+          valueFrom:
+            configMapKeyRef:
+              name: connectwell-config
+              key: TURN_URL
+        - name: TURN_USER
+          valueFrom:
+            secretKeyRef:
+              name: connectwell-secrets
+              key: TURN_USER
+        - name: TURN_PASS
+          valueFrom:
+            secretKeyRef:
+              name: connectwell-secrets
+              key: TURN_PASS
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+      # Add tolerations/nodeSelectors if required

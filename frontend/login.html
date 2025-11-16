@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connectwell — Login</title>
+  <link rel="stylesheet" href="/demo/style.css">
+  <style>
+    /* small page-specific overrides */
+    .wrap{max-width:520px;margin:40px auto;padding:18px}
+    .card{padding:18px}
+    input{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);margin-top:8px;background:transparent;color:inherit}
+    .muted{color:var(--muted);font-size:13px}
+    button{margin-top:12px;padding:10px 12px;border-radius:8px;background:linear-gradient(90deg,var(--accent),#4ade80);border:none;color:#062018;cursor:pointer}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Sign in</h2>
+      <a href="/index.html" style="color:#6ee7b7">Home</a>
+    </div>
+
+    <div class="card">
+      <div>
+        <label class="muted">Email</label>
+        <input id="email" placeholder="you@example.com" />
+        <button id="sendPin">Send PIN</button>
+      </div>
+
+      <hr style="margin:14px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)" />
+
+      <div>
+        <label class="muted">Enter PIN</label>
+        <input id="pin" placeholder="1234" />
+        <button id="verifyPin">Verify & Sign in</button>
+      </div>
+
+      <div style="margin-top:12px" class="muted">Or <a href="/lobby.html" style="color:#6ee7b7">continue anonymously</a></div>
+    </div>
+  </div>
+
+  <script>
+    async function postJson(url, body){
+      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      return r.json();
+    }
+
+    document.getElementById('sendPin').onclick = async ()=>{
+      const email = document.getElementById('email').value.trim();
+      if(!email) return alert('Enter email');
+      const j = await postJson('/api/v1/auth/send_pin', {email});
+      alert(j.message || 'If that email exists a PIN was sent');
+    };
+
+    document.getElementById('verifyPin').onclick = async ()=>{
+      const email = document.getElementById('email').value.trim();
+      const pin = document.getElementById('pin').value.trim();
+      if(!email || !pin) return alert('Email and PIN required');
+      const r = await fetch('/api/v1/auth/verify_pin', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email,pin})});
+      const j = await r.json();
+      if(!j.ok){ return alert(j.message || 'Verify failed'); }
+      const tokens = j.user || j;
+      // store token(s)
+      if(tokens.access_token) localStorage.setItem('access_token', tokens.access_token);
+      if(tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
+      // store basic user info
+      if(tokens.email) localStorage.setItem('user_email', tokens.email);
+      // redirect to lobby
+      window.location.href = '/lobby.html';
+    };
+  </script>
+</body>
+</html>

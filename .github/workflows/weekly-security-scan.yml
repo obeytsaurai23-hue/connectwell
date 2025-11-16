@@ -1,0 +1,79 @@
+name: Weekly Security Scan
+
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Every Monday at 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install project deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run pip-audit
+        working-directory: backend
+        run: |
+          pip install pip-audit
+          # Fail the job if HIGH or CRITICAL findings are present
+          pip-audit --format json --output ../pip-audit-report.json --progress no --fail-on HIGH,CRITICAL
+
+      - name: Upload pip-audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: backend/../pip-audit-report.json
+
+      - name: Build backend image
+        run: |
+          docker build -t connectwell-backend:scan -f backend/Dockerfile backend
+
+      - name: Build backup image
+        run: |
+          docker build -t connectwell-backup:scan -f images/backup-job/Dockerfile images/backup-job
+
+      - name: Scan backend image with Trivy
+        uses: aquasecurity/trivy-action@v1
+        with:
+          image-ref: connectwell-backend:scan
+          format: 'json'
+          output: trivy-backend.json
+          severity: 'CRITICAL,HIGH'
+          # Exit with non-zero if findings at HIGH/CRITICAL exist
+          exit-code: '1'
+
+      - name: Scan backup image with Trivy
+        uses: aquasecurity/trivy-action@v1
+        with:
+          image-ref: connectwell-backup:scan
+          format: 'json'
+          output: trivy-backup.json
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: |
+            trivy-backend.json
+            trivy-backup.json
+      - name: Notify Slack on failures
+        if: failure() && secrets.SLACK_WEBHOOK_URL
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -e
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(jq -n --arg repo "${{ github.repository }}" --arg run "$RUN_URL" '{text: "[Connectwell] Weekly security scan detected HIGH/CRITICAL findings for "+$repo+". See details: "+$run}')
+          curl -sS -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true

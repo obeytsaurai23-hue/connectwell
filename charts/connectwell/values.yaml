@@ -1,0 +1,75 @@
+# Default values for connectwell chart
+# This file contains the configurable defaults for the Connectwell Helm chart.
+image:
+  repository: connectwell/backend
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - /
+  tls: []
+
+resources: {}
+
+env:
+  DJANGO_SETTINGS_MODULE: "connectwell.settings"
+  DEBUG: "false"
+
+postgres:
+  enabled: false
+  host: ""
+  port: 5432
+  db: connectwell
+  user: connectwell
+  password: ""
+
+redis:
+  url: ""
+
+turn:
+  enabled: false
+  urls:
+    - "stun:stun.l.google.com:19302"
+  username: ""
+  password: ""
+
+backup:
+  enabled: false
+  schedule: "0 2 * * *" # daily at 02:00
+  retention: 7
+  s3:
+    enabled: false
+    bucket: ""
+    region: ""
+    # If you prefer to provide AWS creds via a Kubernetes Secret, set secretName
+    # to the name of that Secret. The chart will inject the Secret as env vars
+    # into the backup CronJob (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION).
+    secretName: ""
+  image:
+    repository: connectwell/backup-job
+    tag: "latest"
+
+secrets:
+  yoco_webhook_secret: "" # should be set in Kubernetes Secret for production
+  django_secret_key: "" 
+
+serviceAccount:
+  create: false
+  name: ""
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

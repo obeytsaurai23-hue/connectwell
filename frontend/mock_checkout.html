@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mock Checkout</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f7fafc }
+    .card{background:white;border-radius:12px;padding:24px;box-shadow:0 6px 24px rgba(15,23,42,0.08);max-width:420px;width:100%;text-align:center}
+    button{background:#0ea5a4;color:white;border:0;padding:12px 18px;border-radius:8px;font-weight:600;cursor:pointer}
+    .small{color:#64748b;margin-top:8px;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Mock Checkout</h2>
+    <p id="desc">Simulated payment for order <strong id="orderId">-</strong></p>
+    <button id="pay">Pay now</button>
+    <div class="small">This is a local mock page used only for development. It will call the server webhook endpoint and notify the parent window.</div>
+    <div id="status" class="small"></div>
+  </div>
+
+  <script>
+    function qs(name){
+      const params = new URLSearchParams(location.search);
+      return params.get(name);
+    }
+    const orderId = qs('order_id') || qs('orderId') || 'unknown';
+    document.getElementById('orderId').textContent = orderId;
+    const status = document.getElementById('status');
+    document.getElementById('pay').addEventListener('click', async ()=>{
+      status.textContent = 'Calling webhook...';
+      try{
+        const res = await fetch('/api/v1/webhooks/yoco/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'payment_success',
+            data: { order_id: orderId, transaction_id: 'MOCKTX-' + Math.random().toString(36).slice(2,9) }
+          })
+        });
+        const j = await res.json().catch(()=>null);
+        status.textContent = 'Webhook called. Server response: ' + (j ? JSON.stringify(j) : res.statusText);
+        // notify parent window (iframe) that order is paid
+        try{
+          window.parent.postMessage({ type: 'order_paid', order_id: orderId }, '*');
+        }catch(e){/* ignore */}
+      }catch(err){
+        status.textContent = 'Error calling webhook: ' + err.message;
+      }
+    });
+  </script>
+</body>
+</html>

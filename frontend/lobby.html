@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connectwell — Lobby</title>
+  <link rel="stylesheet" href="/demo/style.css">
+  <style>
+    .wrap{max-width:960px;margin:28px auto;padding:18px}
+    .card{padding:18px}
+    .row{display:flex;gap:12px;align-items:center}
+    .pill{background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:999px}
+    select{padding:8px;border-radius:8px}
+    a{color:var(--accent)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <h2 style="margin:0">Lobby</h2>
+        <div class="muted">Choose your mode and preferences</div>
+      </div>
+      <div class="row">
+        <a href="/wallet.html" class="pill">Wallet</a>
+        <a href="/chat_demo.html" class="pill">Quick Demo</a>
+      </div>
+    </header>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div>
+          <label class="muted">Mode</label>
+          <select id="mode">
+            <option value="video">Video</option>
+            <option value="text">Text</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted">Interests (comma)</label>
+          <input id="interests" placeholder="music,travel" />
+        </div>
+        <div>
+          <button id="startMatch">Start Matching</button>
+        </div>
+      </div>
+
+      <div style="margin-top:8px" class="muted">Session preferences</div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <label class="muted"><input type="checkbox" id="auto_unblur"> Auto-unblur</label>
+        <label class="muted"><input type="checkbox" id="auto_buy"> Auto-buy when low</label>
+         <label class="muted"><input type="checkbox" id="charge_viewers"> Charge viewers to unblur my video</label>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // load preferences if logged in
+    async function loadPrefs(){
+      const token = localStorage.getItem('access_token');
+      if(!token) return;
+      try{
+        const r = await fetch('/api/v1/auth/preferences', { headers:{ 'Authorization':'Bearer '+token } });
+        if(r.ok){ const j = await r.json(); document.getElementById('auto_unblur').checked = j.auto_unblur; document.getElementById('auto_buy').checked = j.auto_buy_coins; }
+          document.getElementById('charge_viewers').checked = !!j.charge_viewers;
+      }catch(e){}
+    }
+    loadPrefs();
+
+    document.getElementById('startMatch').onclick = ()=>{
+      const mode = document.getElementById('mode').value;
+      // store a small context and open chat demo
+      const ctx = { mode, interests: document.getElementById('interests').value };
+      localStorage.setItem('last_ctx', JSON.stringify(ctx));
+      // pass token as stored; chat_demo reads anon_token or access_token
+      window.location.href = '/chat_demo.html';
+    };
+
+    // wire preference toggles to server on change
+    document.getElementById('auto_unblur').onchange = async ()=>{
+      const token = localStorage.getItem('access_token'); if(!token) return; await fetch('/api/v1/auth/preferences', { method:'PATCH', headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+token }, body: JSON.stringify({ auto_unblur: document.getElementById('auto_unblur').checked }) });
+    };
+    document.getElementById('auto_buy').onchange = async ()=>{
+      const token = localStorage.getItem('access_token'); if(!token) return; await fetch('/api/v1/auth/preferences', { method:'PATCH', headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+token }, body: JSON.stringify({ auto_buy_coins: document.getElementById('auto_buy').checked }) });
+    };
+      document.getElementById('charge_viewers').onchange = async ()=>{ 
+        const token = localStorage.getItem('access_token'); if(!token) return; await fetch('/api/v1/auth/preferences', { method:'PATCH', headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+token }, body: JSON.stringify({ charge_viewers: document.getElementById('charge_viewers').checked }) }); 
+      };
+  </script>
+</body>
+</html>
