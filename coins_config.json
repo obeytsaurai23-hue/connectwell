@@ -3,7 +3,7 @@
     "starter": { "price": 0.99, "coins": 25 },
     "chatter": { "price": 2.99, "coins": 90 },
     "social": { "price": 5.99, "coins": 200 },
-    "power_user": { "price": 14.99, "coins": 600 }
+    "power": { "price": 14.99, "coins": 600 }
   },
   "costs": {
     "unblur_session": 20,
@@ -11,7 +11,8 @@
     "location_filter_hour": 15,
     "hd_video_session": 10,
     "instant_connect": 10
-  },
+  }
+  ,
   "premium": {
     "monthly_price": 4.99,
     "monthly_coins": 50

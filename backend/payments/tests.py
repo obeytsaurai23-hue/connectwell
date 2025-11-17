@@ -1,8 +1,11 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
+import json
+from pathlib import Path
 from .models import Order
 from accounts.models import WalletTransaction
+from django.conf import settings
 
 User = get_user_model()
 
@@ -11,6 +14,31 @@ class PaymentsTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create(email='paytest@example.com')
+        self.user.coins = 0  # Ensure user starts with 0 coins
+        self.user.save()
+
+
+class PremiumPurchaseTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create(username='prem', email='prem@example.com', coins=0)
+
+    def test_premium_purchase_and_activate(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post('/api/v1/premium/purchase', data={}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        order_id = resp.data.get('order_id')
+        # mark paid via test endpoint
+        mark = self.client.post('/api/v1/test/mark_order_paid', data={'order_id': order_id}, format='json')
+        self.assertEqual(mark.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_premium)
+        # monthly coins credited
+        # read coins_config
+        coins_conf_path = Path(settings.BASE_DIR).parent / 'coins_config.json'
+        conf = json.loads(coins_conf_path.read_text())
+        monthly = int(conf.get('premium', {}).get('monthly_coins', 0))
+        self.assertEqual(self.user.coins, monthly)
 
     def test_create_purchase_and_webhook_credits_coins(self):
         # create an order via endpoint

@@ -16,7 +16,8 @@ class CreatePurchaseView(APIView):
     def post(self, request):
         pack_id = request.data.get('pack_id')
         if not pack_id:
-            return Response({'ok': False, 'message': 'pack_id required'}, status=status.HTTP_400_BAD_REQUEST)
+            resp = {'ok': False, 'message': 'pack_id required'}
+            return Response(resp, status=status.HTTP_400_BAD_REQUEST)
         # Lookup pack metadata from root-level coins_config.json
         coins_conf_path = Path(settings.BASE_DIR).parent / 'coins_config.json'
         try:
@@ -25,13 +26,46 @@ class CreatePurchaseView(APIView):
             conf = {}
         pack = conf.get('packs', {}).get(pack_id)
         if not pack:
-            return Response({'ok': False, 'message': 'unknown pack_id'}, status=status.HTTP_400_BAD_REQUEST)
+            resp = {'ok': False, 'message': 'unknown pack_id'}
+            return Response(resp, status=status.HTTP_400_BAD_REQUEST)
         amount = pack.get('price')
         user = None
         if request.user and request.user.is_authenticated:
             user = request.user
         order = Order.objects.create(user=user, pack_id=pack_id, amount=amount)
         # In dev/demo mode we can use a local mock checkout page for end-to-end testing
+        if os.environ.get('MOCK_CHECKOUT') == '1':
+            checkout_url = f"/mock_checkout.html?order_id={order.id}"
+        else:
+            checkout_url = f"https://yoco.example/checkout/{order.id}"
+        resp = {
+            'ok': True,
+            'checkout_url': checkout_url,
+            'order_id': str(order.id),
+        }
+        return Response(resp)
+
+
+class CreatePremiumView(APIView):
+    """Create a premium subscription order (monthly).
+
+    Uses coins_config.json premium.monthly_price for amount.
+    """
+    def post(self, request):
+        coins_conf_path = Path(settings.BASE_DIR).parent / 'coins_config.json'
+        try:
+            conf = json.loads(coins_conf_path.read_text())
+        except Exception:
+            conf = {}
+        premium = conf.get('premium', {})
+        amount = premium.get('monthly_price')
+        if amount is None:
+            resp = {'ok': False, 'message': 'premium not configured'}
+            return Response(resp, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        user = None
+        if request.user and request.user.is_authenticated:
+            user = request.user
+        order = Order.objects.create(user=user, pack_id='premium', amount=amount)
         if os.environ.get('MOCK_CHECKOUT') == '1':
             checkout_url = f"/mock_checkout.html?order_id={order.id}"
         else:
@@ -68,11 +102,13 @@ class YocoWebhookView(APIView):
                 raw_body = request.body or b''
             sig_header = request.META.get('HTTP_X_YOCO_SIGNATURE') or request.META.get('HTTP_X_SIGNATURE')
             if not sig_header:
-                return Response({'ok': False, 'message': 'missing signature'}, status=status.HTTP_400_BAD_REQUEST)
+                resp = {'ok': False, 'message': 'missing signature'}
+                return Response(resp, status=status.HTTP_400_BAD_REQUEST)
             mac = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
             # compare in constant time
             if not hmac.compare_digest(mac, sig_header):
-                return Response({'ok': False, 'message': 'invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
+                resp = {'ok': False, 'message': 'invalid signature'}
+                return Response(resp, status=status.HTTP_400_BAD_REQUEST)
 
         # Now safe to use parsed data (DRF may have already parsed it above in some runtimes)
         try:
@@ -80,7 +116,14 @@ class YocoWebhookView(APIView):
         except Exception:
             # If DRF parsing isn't available, try to decode the raw body we read above
             try:
-                event = json.loads(raw_body.decode() if isinstance(raw_body, (bytes, bytearray)) else raw_body)
+                if isinstance(raw_body, (bytes, bytearray)):
+                    try:
+                        decoded = raw_body.decode()
+                    except Exception:
+                        decoded = None
+                else:
+                    decoded = raw_body
+                event = json.loads(decoded) if decoded else {}
             except Exception:
                 event = {}
 
@@ -130,6 +173,32 @@ class YocoWebhookView(APIView):
                                 reason=f'purchase:{order.pack_id}',
                                 metadata={'order_id': str(order.id)},
                             )
+                    # If this was a premium subscription, handle activation/expiry.
+                    # Premium config is stored separately in coins_config.json
+                    if order.pack_id == 'premium':
+                        prem = conf.get('premium', {})
+                        try:
+                            monthly = int(prem.get('monthly_coins', 0))
+                        except Exception:
+                            monthly = 0
+                        # activate or extend premium: set is_premium and extend expiry by 30 days
+                        from django.utils import timezone
+                        from datetime import timedelta
+                        now = timezone.now()
+                        current_exp = getattr(order.user, 'premium_expires_at', None)
+                        base = current_exp if current_exp and current_exp > now else now
+                        new_expiry = base + timedelta(days=30)
+                        order.user.is_premium = True
+                        order.user.premium_expires_at = new_expiry
+                        order.user.coins = (order.user.coins or 0) + monthly
+                        order.user.save()
+                        metadata = {'order_id': str(order.id), 'new_expiry': new_expiry.isoformat()}
+                        WalletTransaction.objects.create(
+                            user=order.user,
+                            amount=monthly,
+                            reason='purchase:premium_activation',
+                            metadata=metadata,
+                        )
                 # record webhook event id as processed
                 if event_id:
                     WebhookEvent.objects.create(event_id=event_id)
@@ -161,7 +230,8 @@ class TestMarkOrderPaidView(APIView):
     POST: { "order_id": "...", "tx_id": "..." }
     """
     def post(self, request):
-        if not getattr(settings, 'DEBUG', False):
+        # Allow in DEBUG or when running the test runner (TESTING flag in settings)
+        if not (getattr(settings, 'DEBUG', False) or getattr(settings, 'TESTING', False)):
             return Response({'ok': False, 'message': 'Not available'}, status=status.HTTP_404_NOT_FOUND)
         order_id = request.data.get('order_id')
         tx = request.data.get('tx_id') or f'test-{order_id}'
@@ -188,6 +258,35 @@ class TestMarkOrderPaidView(APIView):
                         reason=f'purchase:{order.pack_id}',
                         metadata={'order_id': str(order.id)},
                     )
-            return Response({'ok': True, 'order_id': str(order.id), 'paid': True})
+                # For test endpoint also handle premium pack special case (premium stored separately in config)
+                if order.pack_id == 'premium':
+                    prem = conf.get('premium', {})
+                    try:
+                        monthly = int(prem.get('monthly_coins', 0))
+                    except Exception:
+                        monthly = 0
+                    from django.utils import timezone
+                    from datetime import timedelta
+                    now = timezone.now()
+                    current_exp = getattr(order.user, 'premium_expires_at', None)
+                    base = current_exp if current_exp and current_exp > now else now
+                    new_expiry = base + timedelta(days=30)
+                    order.user.is_premium = True
+                    order.user.premium_expires_at = new_expiry
+                    order.user.coins = (order.user.coins or 0) + monthly
+                    order.user.save()
+                    metadata = {'order_id': str(order.id), 'new_expiry': new_expiry.isoformat()}
+                    WalletTransaction.objects.create(
+                        user=order.user,
+                        amount=monthly,
+                        reason='purchase:premium_activation',
+                        metadata=metadata,
+                    )
+            resp = {
+                'ok': True,
+                'order_id': str(order.id),
+                'paid': True,
+            }
+            return Response(resp)
         except Order.DoesNotExist:
             return Response({'ok': False, 'message': 'order not found'}, status=status.HTTP_404_NOT_FOUND)

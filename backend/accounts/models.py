@@ -21,6 +21,20 @@ class User(AbstractUser):
     auto_buy_pack_id = models.CharField(max_length=64, default='starter')
     # If True, this user requires viewers to pay to unblur their video by default
     charge_viewers = models.BooleanField(default=False)
+    # Profile fields used for premium filtering
+    GENDER_CHOICES = [
+        ('male', 'Male'),
+        ('female', 'Female'),
+        ('other', 'Other'),
+        ('prefer_not', 'Prefer not to say'),
+    ]
+    gender = models.CharField(max_length=32, choices=GENDER_CHOICES, null=True, blank=True)
+    # birth_year stored for simple age calculation; nullable for existing users
+    birth_year = models.IntegerField(null=True, blank=True)
+    # simple location string (city/country). Frontend will attempt to set this via Geolocation.
+    location = models.CharField(max_length=256, null=True, blank=True)
+    # If set, the datetime when premium access expires; null means no expiry (not premium)
+    premium_expires_at = models.DateTimeField(null=True, blank=True)
 
 
 class PinCode(models.Model):

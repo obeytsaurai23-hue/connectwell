@@ -130,6 +130,10 @@ class TestCreateUserView(APIView):
         auto_buy_coins = bool(request.data.get('auto_buy_coins', False))
         auto_buy_pack_id = request.data.get('auto_buy_pack_id')
         charge_viewers = bool(request.data.get('charge_viewers', False))
+        # profile fields (optional in tests, but ensure defaults exist)
+        gender = request.data.get('gender') or 'other'
+        birth_year = request.data.get('birth_year')
+        location = request.data.get('location') or 'unknown'
         # Ensure we create a unique username to avoid UNIQUE constraint on username
         user = User.objects.filter(email=email).first()
         if not user:
@@ -141,6 +145,14 @@ class TestCreateUserView(APIView):
         if auto_buy_pack_id:
             user.auto_buy_pack_id = auto_buy_pack_id
         user.charge_viewers = charge_viewers
+        # apply profile defaults used by tests/helpers
+        try:
+            user.gender = gender
+            if birth_year:
+                user.birth_year = int(birth_year)
+            user.location = location
+        except Exception:
+            pass
         user.is_verified = True
         # create unusable password for the test user
         user.set_unusable_password()

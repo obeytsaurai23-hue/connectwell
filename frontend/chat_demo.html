@@ -17,9 +17,20 @@
     <header>
       <h1>Connectwell — anonymous video demo</h1>
       <div class="controls">
-        <label class="small">Mode
-          <select id="mode"><option value="video">Video</option><option value="text">Text</option></select>
-        </label>
+          <label class="small">Mode
+            <select id="mode"><option value="video">Video</option><option value="text">Text</option></select>
+          </label>
+          <!-- Simple profile inputs used for pairing and optional filters (premium-only) -->
+          <label class="small" style="margin-left:8px">Gender
+            <select id="profileGender"><option value="any">Any</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select>
+          </label>
+          <label class="small" style="margin-left:8px">Age
+            <input id="profileAge" placeholder="e.g. 25" style="width:56px" />
+          </label>
+          <label class="small" style="margin-left:8px">Location
+            <input id="profileLocation" placeholder="city/country" style="width:110px" />
+          </label>
+          <label class="small" style="margin-left:8px"><input type="checkbox" id="useFilters"> Request filters</label>
         <button id="connect">Connect</button>
         <button id="enqueue" disabled>Enqueue</button>
         <button id="hangup" disabled>Hang up</button>
@@ -35,6 +46,7 @@
           </div>
           <div class="wallet">
             <button id="buyCoinsBtn">Buy coins</button>
+            <button id="goPremiumBtn" style="margin-left:8px">Go Premium</button>
             <div class="pill" id="balanceLabel">Balance: —</div>
           </div>
         </div>
@@ -103,6 +115,16 @@
           <button id="checkoutPaidBtn" style="background:var(--accent);border-radius:8px;padding:8px 12px;border:none;cursor:pointer">I've paid — verify</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Mock Ad modal -->
+  <div id="adModal" style="display:none;position:fixed;inset:0;z-index:1250;align-items:center;justify-content:center;">
+    <div style="position:absolute;inset:0;background:rgba(2,6,23,0.7)" onclick="cancelAd()"></div>
+    <div style="position:relative;width:90%;max-width:640px;margin:auto;background:var(--card);border-radius:12px;padding:18px;text-align:center;">
+      <div style="font-weight:700;margin-bottom:6px">Sponsored video ad</div>
+      <div id="adCounter" style="font-size:20px;margin:18px 0">Ad ends in 15s</div>
+      <div><button id="skipAdBtn" style="padding:8px 12px;border-radius:8px;">Skip (when available)</button></div>
     </div>
   </div>
 
@@ -176,8 +198,64 @@
       ws.onclose = () => { log('WebSocket closed'); };
     };
 
-    document.getElementById('enqueue').onclick = () => { const mode = document.getElementById('mode').value; const token = localStorage.getItem('anon_token') || null; ws.send(JSON.stringify({ action: 'enqueue', mode, token })); log('Enqueued: ' + mode); document.getElementById('hangup').disabled = false; };
-    document.getElementById('hangup').onclick = () => { if (pc) pc.close(); pc = null; if (ws) ws.send(JSON.stringify({ action: 'next' })); log('Hung up'); document.getElementById('enqueue').disabled = false; unblurBtn.disabled = true; };
+    document.getElementById('enqueue').onclick = () => {
+      const mode = document.getElementById('mode').value;
+      const token = localStorage.getItem('anon_token') || null;
+      // build profile and optional filters
+      const profile = {};
+      const g = document.getElementById('profileGender').value;
+      if(g && g !== 'any') profile.gender = g;
+      const a = document.getElementById('profileAge').value; if(a) profile.age = parseInt(a);
+      const loc = document.getElementById('profileLocation').value; if(loc) profile.location = loc;
+      const useFilters = document.getElementById('useFilters').checked;
+      const payload = { action: 'enqueue', mode, token, profile };
+      if(useFilters){ payload.filters = { gender: document.getElementById('profileGender').value, age_min: null, age_max: null, location: document.getElementById('profileLocation').value }; }
+      // Attempt to detect location automatically if not provided
+      if(!profile.location && navigator.geolocation){
+        navigator.geolocation.getCurrentPosition(function(pos){
+          // simple lat/lon string - server or UI can map as needed
+          profile.location = pos.coords.latitude.toFixed(4) + ',' + pos.coords.longitude.toFixed(4);
+          payload.profile = profile;
+          if(useFilters) payload.filters.location = profile.location;
+          ws.send(JSON.stringify(payload));
+          log('Enqueued: ' + mode + (useFilters ? ' (with filters)' : '') + ' (location detected)');
+        }, function(err){
+          // if geolocation blocked, fall back to whatever user entered (if any)
+          ws.send(JSON.stringify(payload));
+          log('Enqueued: ' + mode + (useFilters ? ' (with filters)' : '') + ' (no location)');
+        }, { timeout: 5000 });
+      } else {
+        ws.send(JSON.stringify(payload));
+        log('Enqueued: ' + mode + (useFilters ? ' (with filters)' : ''));
+      }
+      document.getElementById('hangup').disabled = false;
+    };
+    document.getElementById('hangup').onclick = async () => {
+      const sessionId = unblurBtn.dataset.session;
+      const token = localStorage.getItem('anon_token') || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      // If we have an active session, ask server whether an ad is required before Next
+      if (sessionId) {
+        try {
+          const resp = await fetch('/api/v1/sessions/' + sessionId + '/next/', { method: 'POST', headers });
+          const body = await resp.json();
+          if (body && body.action === 'ad_required') {
+            // show ad modal, require playback, then notify server and proceed
+            await playMockAd(sessionId, headers);
+          }
+        } catch (e) {
+          log('Next-check failed: ' + e + ' — proceeding');
+        }
+      }
+
+      if (pc) pc.close(); pc = null;
+      // notify via websocket to find next peer
+      if (ws) ws.send(JSON.stringify({ action: 'next' }));
+      log('Hung up');
+      document.getElementById('enqueue').disabled = false; unblurBtn.disabled = true;
+    };
 
     async function startWebRTC(a, b){
       const initiator = a < b; pc = new RTCPeerConnection(getIceServers());
@@ -207,6 +285,13 @@
     document.getElementById('buyCoinsBtn').onclick = async ()=>{
       const token = localStorage.getItem('anon_token') || ''; const headers={'Content-Type':'application/json'}; if(token) headers['Authorization']='Bearer '+token;
       const resp = await fetch('/api/v1/coins/purchase', { method:'POST', headers, body: JSON.stringify({ pack_id:'starter' }) }); const body = await resp.json(); if(resp.status===200 && body.checkout_url){ window.open(body.checkout_url,'_blank'); pollOrder(body.order_id, refreshBalance); }
+    };
+
+    document.getElementById('goPremiumBtn').onclick = async ()=>{
+      const token = localStorage.getItem('anon_token') || ''; const headers={'Content-Type':'application/json'}; if(token) headers['Authorization']='Bearer '+token;
+      const resp = await fetch('/api/v1/premium/purchase', { method:'POST', headers, body: JSON.stringify({}) });
+      const body = await resp.json();
+      if(resp.status===200 && body.checkout_url){ showCheckoutModal(body.order_id, body.checkout_url, async ()=>{ await refreshBalance(); showToast('Premium activated'); }); }
     };
 
     // Replace tab-based open with modal
@@ -275,6 +360,27 @@
 
     // initial sync
     refreshBalance();
+
+    // --- Mock ad playback helpers ---
+    function cancelAd(){ const m=document.getElementById('adModal'); m.style.display='none'; }
+    async function playMockAd(sessionId, headers){
+      return new Promise((resolve)=>{
+        const modal = document.getElementById('adModal');
+        const counter = document.getElementById('adCounter');
+        const skipBtn = document.getElementById('skipAdBtn');
+        modal.style.display='flex';
+        let t = 15; counter.textContent = 'Ad ends in ' + t + 's';
+        skipBtn.disabled = true;
+        const iv = setInterval(()=>{ t -= 1; counter.textContent = 'Ad ends in ' + t + 's'; if(t<=5){ skipBtn.disabled = false; } if(t<=0){ clearInterval(iv); finish(); } }, 1000);
+        const finish = async ()=>{
+          modal.style.display='none';
+          // notify server ad watched
+          try{ await fetch('/api/v1/sessions/' + sessionId + '/next/ad_watched/', { method:'POST', headers }); }catch(e){ /* ignore */ }
+          resolve();
+        };
+        skipBtn.onclick = ()=>{ clearInterval(iv); finish(); };
+      });
+    }
   </script>
   </script>
 </body>
