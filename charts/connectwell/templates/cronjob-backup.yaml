@@ -1,0 +1,46 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "connectwell.fullname" . | default (printf "%s" .Chart.Name) }}-backup
+spec:
+  schedule: "{{ .Values.backup.schedule }}"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}"
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: POSTGRES_HOST
+                  value: "{{ .Values.postgres.host }}"
+                - name: POSTGRES_PORT
+                  value: "{{ .Values.postgres.port }}"
+                - name: POSTGRES_USER
+                  value: "{{ .Values.postgres.user }}"
+                - name: POSTGRES_DB
+                  value: "{{ .Values.postgres.db }}"
+                - name: S3_BUCKET
+                  value: "{{ .Values.backup.s3.bucket }}"
+                - name: S3_REGION
+                  value: "{{ .Values.backup.s3.region }}"
+                {{- if .Values.backup.s3.secretName }}
+                # Inject AWS credentials from a Kubernetes Secret if configured
+                - name: AWS_CREDENTIALS_INJECTED
+                  value: "1"
+                {{- end }}
+              {{- if .Values.backup.s3.secretName }}
+              envFrom:
+                - secretRef:
+                    name: "{{ .Values.backup.s3.secretName }}"
+              {{- end }}
+              # assume the image contains an entrypoint that performs the backup
+              command: ["/backup/entrypoint.sh"]
+              resources: {}
+          volumes: []
+{{- end }}

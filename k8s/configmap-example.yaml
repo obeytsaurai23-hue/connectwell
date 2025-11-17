@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: connectwell-config
+data:
+  DJANGO_ALLOWED_HOSTS: "example.com"
+  TURN_URL: "turn:coturn.example:3478"

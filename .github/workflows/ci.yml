@@ -1,0 +1,529 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, ci/add-e2e-workflow ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    env:
+      MOCK_CHECKOUT: '1'
+      DJANGO_SETTINGS_MODULE: connectwell.settings
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Django migrations
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+
+      - name: Run Django tests
+        working-directory: backend
+        run: |
+          python manage.py test --verbosity=2
+
+      - name: Run flake8
+        run: |
+          python -m pip install flake8
+          python -m flake8 --max-line-length=120
+
+      - name: Run mypy
+        run: |
+          python -m pip install mypy
+          python -m mypy backend --config-file mypy.ini
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: backend-tests
+    env:
+      MOCK_CHECKOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Migrate DB and run Django server
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+          nohup python manage.py runserver 0.0.0.0:8000 &
+          sleep 5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Run Playwright E2E
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps
+          npx playwright test --reporter=list
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MOCK_CHECKOUT: '1'
+      AUTO_COMPLETE_PURCHASES: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install apt deps for Playwright
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3 libatk1.0-0 libgtk-3-0 libxss1 libasound2
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt || true
+
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install --with-deps
+
+      - name: Run linters
+        run: |
+          python -m flake8
+
+      - name: Run unit tests
+        run: |
+          cd backend
+          python -m pytest -q
+
+      - name: Run E2E tests (Playwright)
+        run: |
+          cd backend
+          python manage.py migrate --noinput
+          python manage.py runserver 127.0.0.1:8000 &
+          # give server a moment to start
+          sleep 5
+          python -m pytest tests/e2e -q
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: connectwell
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/connectwell
+      REDIS_URL: redis://localhost:6379/0
+      DJANGO_DEBUG: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Run pip-audit for Python dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip-audit --progress no --fail-on HIGH,CRITICAL
+      - name: Run tests
+        working-directory: backend
+        run: |
+          python manage.py test --verbosity=2
+
+  build-image:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Helm chart
+        # install helm and run helm lint on the chart
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm version
+          helm lint charts/connectwell
+          # validate templating with example production values
+          helm template charts/connectwell -f charts/connectwell/values-production.yaml > /tmp/helm-template-output.yaml
+      - name: Build Docker image
+        run: |
+          docker build -t connectwell-backend:ci -f backend/Dockerfile backend
+      - name: Scan backend image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v1
+        with:
+          image-ref: connectwell-backend:ci
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+      # Optionally push to registry (requires secrets)
+      # - name: Push image
+      #   uses: docker/build-push-action@v4
+      #   with:
+      #     push: true
+      #     tags: ${{ secrets.REGISTRY }}/connectwell-backend:latest
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: build-image
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: connectwell
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/connectwell
+      REDIS_URL: redis://localhost:6379/0
+      DJANGO_DEBUG: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Install dependencies (including playwright)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          python -m playwright install --with-deps
+      - name: Start Django server
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+          nohup python manage.py runserver 0.0.0.0:8000 &
+          # wait for the demo page to become available
+          until curl -sSf http://127.0.0.1:8000/demo/mock_checkout.html; do sleep 1; done
+      - name: Run E2E tests
+        run: |
+          pytest -q backend/tests/e2e
+
+  push-backup-image:
+    name: Build & push backup-job image (on tags)
+    runs-on: ubuntu-latest
+    needs: build-image
+    # Only run when publishing a tag
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Login to registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Build and push backup image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./images/backup-job
+          file: ./images/backup-job/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_REPOSITORY }}:${{ github.ref_name }}
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_REPOSITORY }}:latest
+
+  package-chart:
+    name: Package Helm chart
+    runs-on: ubuntu-latest
+    needs: build-image
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm version
+      - name: Package chart
+        run: |
+          mkdir -p chartpkg
+          helm package charts/connectwell -d chartpkg
+      - name: Upload chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: connectwell-chart
+          path: chartpkg/*.tgz
+
+  publish-chart:
+    name: Publish chart to gh-pages (on tags)
+    runs-on: ubuntu-latest
+    needs: package-chart
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm version
+      - name: Package chart (again, to ensure artifact present)
+        run: |
+          mkdir -p chartpkg
+          helm package charts/connectwell -d chartpkg
+      - name: Publish to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          # prepare gh-pages working dir
+          mkdir -p gh-pages
+          cd gh-pages
+          git init
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          # Try to fetch existing gh-pages branch
+          git fetch origin gh-pages || true
+          git checkout -B gh-pages || true
+          mkdir -p charts
+          # copy packaged charts
+          cp ../chartpkg/*.tgz charts/ || true
+          # create or update index.yaml
+          if [ -f index.yaml ]; then
+            helm repo index . --merge index.yaml --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          else
+            helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          fi
+          git add charts/*.tgz index.yaml || true
+          git commit -m "chore(release): publish chart for ${GITHUB_REF_NAME:-${{ github.ref_name }}}" || echo "no changes to commit"
+          git push origin gh-pages --force
+
+  create-release:
+    name: Create GitHub release and attach chart (on tags)
+    runs-on: ubuntu-latest
+    needs: package-chart
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm version
+      - name: Package chart
+        run: |
+          mkdir -p chartpkg
+          helm package charts/connectwell -d chartpkg
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: "${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload chart to Release
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./chartpkg/*.tgz
+          asset_name: connectwell-{{ .Chart.Version | default "chart" }}-${{ github.ref_name }}.tgz
+          asset_content_type: application/gzip
+
+  publish-oci:
+    name: Publish Helm chart as OCI artifact (on tags)
+    runs-on: ubuntu-latest
+    needs: package-chart
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm version
+      - name: Prepare package
+        run: |
+          mkdir -p chartpkg
+          helm package charts/connectwell -d chartpkg
+      - name: Login to OCI registry
+        env:
+          OCI_REGISTRY: ${{ secrets.OCI_REGISTRY }}
+          OCI_USERNAME: ${{ secrets.OCI_USERNAME }}
+          OCI_PASSWORD: ${{ secrets.OCI_PASSWORD }}
+        run: |
+          set -eux
+          if [ -z "${OCI_REGISTRY}" ] || [ -z "${OCI_USERNAME}" ] || [ -z "${OCI_PASSWORD}" ]; then
+            echo "OCI_REGISTRY, OCI_USERNAME and OCI_PASSWORD must be set as repository secrets to publish OCI chart";
+            exit 1;
+          fi
+          helm registry login ${OCI_REGISTRY} --username ${OCI_USERNAME} --password ${OCI_PASSWORD}
+      - name: Push chart to OCI
+        env:
+          OCI_REGISTRY: ${{ secrets.OCI_REGISTRY }}
+          OCI_REPOSITORY: ${{ secrets.OCI_REPOSITORY }}
+        run: |
+          set -eux
+          if [ -z "${OCI_REPOSITORY}" ]; then
+            echo "OCI_REPOSITORY secret must be set (e.g. owner/repo)"; exit 1;
+          fi
+          for f in chartpkg/*.tgz; do
+            helm push "$f" oci://${OCI_REGISTRY}/${OCI_REPOSITORY}
+          done
+
+  backup-integration:
+    name: Backup integration test
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: connectwell
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Build backup image
+        run: |
+          docker build -t connectwell/backup-job:test -f images/backup-job/Dockerfile images/backup-job
+      - name: Scan backup image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v1
+        with:
+          image-ref: connectwell/backup-job:test
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+      - name: Run backup container against Postgres service
+        env:
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_DB: connectwell
+          POSTGRES_PASSWORD: postgres
+          S3_BUCKET: ""
+          S3_REGION: ""
+        run: |
+          # Run container with host networking so it can reach the job service on localhost
+          docker run --rm --network host \
+            -e POSTGRES_HOST=${POSTGRES_HOST} -e POSTGRES_PORT=${POSTGRES_PORT} \
+            -e POSTGRES_USER=${POSTGRES_USER} -e POSTGRES_DB=${POSTGRES_DB} -e POSTGRES_PASSWORD=${POSTGRES_PASSWORD} \
+            -e S3_BUCKET="" -e S3_REGION="" \
+            connectwell/backup-job:test
+
+  kind-smoke-test:
+    name: Kind smoke test (helm install)
+    runs-on: ubuntu-latest
+    needs: package-chart
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: '1.30.0'
+      - name: Set up kind
+        uses: engineerd/setup-kind@v0.11.1
+        with:
+          version: v0.20.0
+      - name: Install Helm
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm version
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name connectwell-ci
+          kubectl cluster-info --context kind-connectwell-ci
+      - name: Package chart
+        run: |
+          mkdir -p chartpkg
+          helm package charts/connectwell -d chartpkg
+      - name: Install chart with nginx override
+        run: |
+          helm install test-connectwell chartpkg/*.tgz --create-namespace --namespace test-connectwell \
+            --set image.repository=nginx --set image.tag=stable --wait --timeout=3m
+      - name: Assert pods are running
+        run: |
+          kubectl get pods -n test-connectwell
+          kubectl wait --for=condition=ready pod -l app=connectwell -n test-connectwell --timeout=2m || kubectl describe pods -n test-connectwell && exit 1
+      - name: Uninstall chart and delete cluster
+        run: |
+          helm uninstall test-connectwell -n test-connectwell || true
+          kind delete cluster --name connectwell-ci || true

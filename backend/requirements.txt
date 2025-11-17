@@ -1,0 +1,14 @@
+Django>=4.2
+djangorestframework
+channels
+channels-redis
+psycopg2-binary
+redis
+uvicorn[standard]
+requests
+python-dotenv
+bcrypt
+djangorestframework-simplejwt
+playwright
+sentry-sdk
+prometheus-client

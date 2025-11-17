@@ -1,0 +1,71 @@
+# Example production values (do NOT commit secrets to VCS)
+image:
+  repository: ghcr.io/your-org/connectwell-backend
+  tag: "v1.0.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 3
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  hosts:
+    - host: connectwell.example.com
+      paths:
+        - /
+  tls:
+    - hosts:
+        - connectwell.example.com
+      secretName: connectwell-tls
+
+resources:
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+
+env:
+  DJANGO_SETTINGS_MODULE: "connectwell.settings"
+  DEBUG: "false"
+
+postgres:
+  enabled: true
+  host: postgres.connectwell.svc.cluster.local
+  port: 5432
+  db: connectwell
+  user: connectwell
+  password: "REDACTED"
+
+redis:
+  url: redis://redis.connectwell.svc.cluster.local:6379/0
+
+turn:
+  enabled: true
+  urls:
+    - "turn:3478"
+  username: "TURN_USER"
+  password: "TURN_PASSWORD"
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: 14
+  s3:
+    enabled: true
+    bucket: "connectwell-backups-prod"
+    region: "us-east-1"
+  image:
+    repository: ghcr.io/your-org/connectwell-backup-job
+    tag: "v1.0.0"
+
+secrets:
+  # Use Helm --set-file or Kubernetes Secrets to supply these safely
+  yoco_webhook_secret: "REDACTED"
+  django_secret_key: "REDACTED"

@@ -1,0 +1,53 @@
+name: E2E Playwright (light)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest-playwright requests
+          playwright install --with-deps
+
+      - name: Run migrations
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+
+      - name: Start Django dev server
+        working-directory: backend
+        run: |
+          export MOCK_CHECKOUT=1
+          # Start server in background
+          python manage.py runserver 0.0.0.0:8000 &
+          # Wait for server to be available
+          for i in {1..30}; do
+            if curl -sSf http://127.0.0.1:8000/demo/mock_checkout.html >/dev/null; then
+              echo Server up
+              break
+            fi
+            echo waiting for server...
+            sleep 1
+          done
+
+      - name: Run backend E2E tests
+        working-directory: backend
+        run: |
+          pytest backend/tests/e2e -q

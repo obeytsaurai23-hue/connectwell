@@ -1,0 +1,6 @@
+# CODEOWNERS assigns reviewers automatically for changes.
+# Update the following line to point to your team or users.
+# Example: `* @your-org/maintainers`
+
+# Replace with the GitHub team or users who should review dependency PRs
+* @your-org/maintainers

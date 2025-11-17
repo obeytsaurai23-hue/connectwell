@@ -1,0 +1,56 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: connectwell-db-backup
+spec:
+  schedule: "0 2 * * *" # daily at 02:00 UTC
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: pg-backup
+            image: postgres:15
+            envFrom:
+            - secretRef:
+                name: connectwell-secrets
+            - configMapRef:
+                name: connectwell-config
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                set -euo pipefail
+                mkdir -p /backups
+                FNAME="$PGDATABASE-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+                # Extract host/user from DATABASE_URL if present
+                if [ -n "${DATABASE_URL:-}" ]; then
+                  PGHOST=$(echo "$DATABASE_URL" | sed -E 's#.*@([^:/]+).*#\1#')
+                  PGUSER=$(echo "$DATABASE_URL" | sed -E 's#postgres://([^:]+):.*@.*#\1#')
+                fi
+                echo "Dumping database to /backups/$FNAME"
+                pg_dump --host="${PGHOST:-$PGHOST}" --username="${PGUSER:-$PGUSER}" --dbname="$PGDATABASE" | gzip > /backups/$FNAME
+                echo "Backup written: /backups/$FNAME"
+                # If S3_BUCKET is configured, try to upload (install awscli at runtime)
+                if [ -n "${S3_BUCKET:-}" ]; then
+                  echo "Uploading to s3://$S3_BUCKET/"
+                  apt-get update && apt-get install -y python3-pip --no-install-recommends && pip3 install awscli
+                  AWS_CONFIGURED=0
+                  if [ -n "${AWS_ACCESS_KEY_ID:-}" -a -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+                    AWS_CONFIGURED=1
+                  fi
+                  if [ $AWS_CONFIGURED -eq 1 ]; then
+                    aws s3 cp /backups/$FNAME s3://$S3_BUCKET/ --region ${AWS_REGION:-us-east-1}
+                  else
+                    echo "AWS credentials not configured; skipping upload"
+                  fi
+                fi
+          volumeMounts:
+          - name: backup-storage
+            mountPath: /backups
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: connectwell-backup-pvc

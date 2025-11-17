@@ -1,0 +1,100 @@
+name: Auto-merge Dependabot patch updates
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests packaging
+      - name: Auto-merge patch updates and request reviewers
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEFAULT_REVIEWERS: ${{ secrets.DEFAULT_REVIEWERS }}
+        run: |
+          python - <<'PY'
+import os, re, sys, requests
+from packaging.version import Version
+
+token = os.environ['GITHUB_TOKEN']
+repo = os.environ['REPO']
+pr_number = os.environ['PR_NUMBER']
+headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github+json'}
+
+# Fetch PR details
+r = requests.get(f'https://api.github.com/repos/{repo}/pulls/{pr_number}', headers=headers)
+if r.status_code != 200:
+    print('Failed to fetch PR', r.status_code, r.text)
+    sys.exit(1)
+data = r.json()
+
+if data.get('user', {}).get('login') != 'dependabot[bot]':
+    print('Not authored by dependabot, skipping')
+    sys.exit(0)
+
+title = data.get('title','')
+print('PR title:', title)
+# Expect titles like: "Bump package from 1.2.3 to 1.2.4"
+m = re.search(r'from ([0-9A-Za-z.+-]+) to ([0-9A-Za-z.+-]+)', title)
+if not m:
+    print('Title did not match version bump pattern, skipping')
+    sys.exit(0)
+old, new = m.group(1), m.group(2)
+print('Versions:', old, new)
+try:
+    v_old = Version(old)
+    v_new = Version(new)
+except Exception as e:
+    print('Version parse failed', e)
+    sys.exit(0)
+
+# Determine if this is a patch update (same major and minor, patch increased)
+is_patch = (v_old.major == v_new.major and v_old.minor == v_new.minor and v_new.micro > v_old.micro)
+if not is_patch:
+    print('Not a patch update, skipping auto-merge')
+    sys.exit(0)
+
+# Ensure heads checks are all successful
+head_sha = data.get('head', {}).get('sha')
+if not head_sha:
+    print('No head sha, skipping')
+    sys.exit(0)
+
+r2 = requests.get(f'https://api.github.com/repos/{repo}/commits/{head_sha}/status', headers=headers)
+if r2.status_code != 200:
+    print('Failed to fetch status for head sha', r2.status_code)
+    sys.exit(1)
+status = r2.json().get('state')
+print('Combined status state:', status)
+if status != 'success':
+    print('Checks not all successful, skipping auto-merge')
+    sys.exit(0)
+
+# Optionally request reviewers from DEFAULT_REVIEWERS (comma-separated usernames)
+def_reviewers = os.environ.get('DEFAULT_REVIEWERS','').strip()
+if def_reviewers:
+    reviewers = [u.strip() for u in def_reviewers.split(',') if u.strip()]
+    if reviewers:
+        print('Requesting reviewers:', reviewers)
+        rr = requests.post(f'https://api.github.com/repos/{repo}/pulls/{pr_number}/requested_reviewers', headers=headers, json={'reviewers': reviewers})
+        if rr.status_code not in (201,200):
+            print('Failed to request reviewers', rr.status_code, rr.text)
+        else:
+            print('Requested reviewers')
+
+# Merge the PR
+merge_resp = requests.put(f'https://api.github.com/repos/{repo}/pulls/{pr_number}/merge', headers=headers, json={'merge_method': 'merge'})
+print('Merge response:', merge_resp.status_code, merge_resp.text)
+if merge_resp.status_code not in (200,201):
+    print('Merge failed or unchanged')
+    sys.exit(1)
+print('Merged PR', pr_number)
+PY

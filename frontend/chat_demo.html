@@ -1,0 +1,387 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connectwell — Chat Demo</title>
+  <link rel="stylesheet" href="/demo/style.css">
+  <style>
+    /* page-specific overrides kept small so global styles live in style.css */
+    .wrap{max-width:1100px;margin:28px auto;padding:20px}
+    .video-tile{width:320px;height:200px}
+    @media (max-width:900px){.video-tile{width:100%;height:220px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Connectwell — anonymous video demo</h1>
+      <div class="controls">
+          <label class="small">Mode
+            <select id="mode"><option value="video">Video</option><option value="text">Text</option></select>
+          </label>
+          <!-- Simple profile inputs used for pairing and optional filters (premium-only) -->
+          <label class="small" style="margin-left:8px">Gender
+            <select id="profileGender"><option value="any">Any</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select>
+          </label>
+          <label class="small" style="margin-left:8px">Age
+            <input id="profileAge" placeholder="e.g. 25" style="width:56px" />
+          </label>
+          <label class="small" style="margin-left:8px">Location
+            <input id="profileLocation" placeholder="city/country" style="width:110px" />
+          </label>
+          <label class="small" style="margin-left:8px"><input type="checkbox" id="useFilters"> Request filters</label>
+        <button id="connect">Connect</button>
+        <button id="enqueue" disabled>Enqueue</button>
+        <button id="hangup" disabled>Hang up</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="small">You are anonymous — enjoy safe & temporary connections</div>
+            <div style="margin-top:8px;font-weight:600">Live preview</div>
+          </div>
+          <div class="wallet">
+            <button id="buyCoinsBtn">Buy coins</button>
+            <button id="goPremiumBtn" style="margin-left:8px">Go Premium</button>
+            <div class="pill" id="balanceLabel">Balance: —</div>
+          </div>
+        </div>
+
+        <div class="video-grid" style="margin-top:14px">
+          <div>
+            <div class="small">Local</div>
+            <div class="video-tile" style="margin-top:6px">
+              <video id="localVideo" autoplay playsinline muted></video>
+            </div>
+          </div>
+
+          <div>
+            <div class="small">Remote</div>
+            <div class="video-tile" style="margin-top:6px">
+              <video id="remoteVideo" autoplay playsinline></video>
+              <div id="remoteOverlay" class="remote-overlay blurred">
+                <div style="text-align:center;color:#dbeafe">
+                  <div style="font-size:18px;font-weight:700">Remote is blurred</div>
+                  <div class="small">Pay to unblur and reveal the video</div>
+                </div>
+                <button id="unblurBtn" class="unblur-btn" disabled>Unblur (pay)</button>
+                <div class="small">Auto-unblur: <label><input type="checkbox" id="autoUnblurChk" checked></label> &nbsp; Auto-buy: <label><input type="checkbox" id="autoBuyChk" checked></label></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="small" style="margin-bottom:6px">Activity log</div>
+          <div id="log"></div>
+        </div>
+      </section>
+
+      <aside class="card">
+        <div style="font-weight:600;margin-bottom:8px">Session & Controls</div>
+        <div class="small">Use the buttons above to connect and find matches. Once matched the remote video is blurred until unblurred.</div>
+        <div style="margin-top:12px">
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <button id="debugBtn">Show Session ID</button>
+            <button id="refreshBalanceSmall">Refresh Balance</button>
+          </div>
+          <div class="small" style="margin-top:8px">Preferences</div>
+          <div class="prefs">
+            <label class="small"><input type="checkbox" id="autoUnblurChkAside" checked> Auto-unblur</label>
+            <label class="small"><input type="checkbox" id="autoBuyChkAside" checked> Auto-buy</label>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Checkout modal -->
+  <div id="checkoutModal" style="display:none;position:fixed;inset:0;z-index:1200;align-items:center;justify-content:center;"> 
+    <div style="position:absolute;inset:0;background:rgba(2,6,23,0.6)" onclick="closeCheckoutModal()"></div>
+    <div style="position:relative;width:90%;max-width:900px;margin:auto">
+      <div style="background:var(--card);border-radius:12px;padding:12px;box-shadow:0 12px 40px rgba(2,6,23,0.7);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-weight:700">Complete purchase</div>
+          <button id="checkoutClose" style="background:transparent;border:none;color:var(--muted);font-size:18px;cursor:pointer">✕</button>
+        </div>
+        <div style="height:560px;background:#000;border-radius:8px;overflow:hidden">
+          <iframe id="checkoutIframe" class="modal-iframe" style="width:100%;height:100%;border:0" src="about:blank"></iframe>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+          <button id="checkoutPaidBtn" style="background:var(--accent);border-radius:8px;padding:8px 12px;border:none;cursor:pointer">I've paid — verify</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mock Ad modal -->
+  <div id="adModal" style="display:none;position:fixed;inset:0;z-index:1250;align-items:center;justify-content:center;">
+    <div style="position:absolute;inset:0;background:rgba(2,6,23,0.7)" onclick="cancelAd()"></div>
+    <div style="position:relative;width:90%;max-width:640px;margin:auto;background:var(--card);border-radius:12px;padding:18px;text-align:center;">
+      <div style="font-weight:700;margin-bottom:6px">Sponsored video ad</div>
+      <div id="adCounter" style="font-size:20px;margin:18px 0">Ad ends in 15s</div>
+      <div><button id="skipAdBtn" style="padding:8px 12px;border-radius:8px;">Skip (when available)</button></div>
+    </div>
+  </div>
+
+  <script>
+    // Toast helper
+    (function(){
+      const s = document.createElement('style');
+      s.textContent = `
+        .cw-toast{position:fixed;right:18px;bottom:18px;background:rgba(2,6,23,0.88);color:#e6f8f0;padding:10px 14px;border-radius:10px;box-shadow:0 10px 30px rgba(2,6,23,0.6);z-index:1400;font-weight:600;opacity:0;transform:translateY(8px);transition:opacity .22s ease, transform .22s ease}
+        .cw-toast.show{opacity:1;transform:translateY(0)}
+      `;
+      document.head.appendChild(s);
+      const t = document.createElement('div'); t.id = 'cw_toast'; t.className = 'cw-toast'; document.body.appendChild(t);
+      window.showToast = (msg, ms=2800)=>{ const el = document.getElementById('cw_toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(window._cw_toast_timer); window._cw_toast_timer = setTimeout(()=>el.classList.remove('show'), ms); };
+    })();
+    // TURN/STUN configuration (can be injected in production)
+    // Example: server-side template can assign window.__TURN_URL__ etc.
+    const TURN_URL = window.__TURN_URL__ || null;
+    const TURN_USER = window.__TURN_USER__ || null;
+    const TURN_PASS = window.__TURN_PASS__ || null;
+    function getIceServers(){
+      const ice = [{ urls: 'stun:stun.l.google.com:19302' }];
+      if(TURN_URL){ ice.push({ urls: TURN_URL, username: TURN_USER, credential: TURN_PASS }); }
+      return { iceServers: ice };
+    }
+
+    // lightweight UI helpers and wiring
+    const logEl = document.getElementById('log');
+    const log = (s) => { logEl.textContent += (new Date()).toLocaleTimeString() + ' — ' + s + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+    // keep references consistent with old ids
+    const autoUnblurChk = document.getElementById('autoUnblurChk');
+    const autoBuyChk = document.getElementById('autoBuyChk');
+    const autoUnblurChkAside = document.getElementById('autoUnblurChkAside');
+    const autoBuyChkAside = document.getElementById('autoBuyChkAside');
+    const balanceLabel = document.getElementById('balanceLabel');
+    const unblurBtn = document.getElementById('unblurBtn');
+
+    // mirror the aside toggles to the overlay toggles
+    autoUnblurChkAside.onchange = () => { autoUnblurChk.checked = autoUnblurChkAside.checked; updatePrefs(); };
+    autoBuyChkAside.onchange = () => { autoBuyChk.checked = autoBuyChkAside.checked; updatePrefs(); };
+    autoUnblurChk.onchange = () => { autoUnblurChkAside.checked = autoUnblurChk.checked; updatePrefs(); };
+    autoBuyChk.onchange = () => { autoBuyChkAside.checked = autoBuyChk.checked; updatePrefs(); };
+
+    let ws, pc, localStream, myId, peerId;
+
+    function makeWS(){
+      const token = localStorage.getItem('anon_token') || '';
+      const q = token ? ('?token=' + encodeURIComponent(token)) : '';
+      const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat/' + q;
+      return new WebSocket(url);
+    }
+
+    document.getElementById('connect').onclick = () => {
+      ws = makeWS();
+      ws.onopen = () => { log('WebSocket open'); document.getElementById('enqueue').disabled = false; };
+      ws.onmessage = async (ev) => {
+        const msg = JSON.parse(ev.data);
+        log('WS ➜ ' + msg.action);
+        if (msg.action === 'queued') { log('Queued for match'); }
+        if (msg.action === 'match_found') {
+          myId = msg.you; peerId = msg.peer; const session = msg.session_id;
+          log('Matched — session ' + session);
+          document.getElementById('remoteOverlay').classList.add('blurred');
+          unblurBtn.dataset.session = session; unblurBtn.disabled = false;
+          startWebRTC(myId, peerId);
+        }
+        if (msg.action === 'signal') await handleSignal(msg.from, msg.payload);
+        if (msg.action === 'unblur') { log('Unblur event'); document.getElementById('remoteOverlay').classList.remove('blurred'); unblurBtn.disabled = true; }
+      };
+      ws.onclose = () => { log('WebSocket closed'); };
+    };
+
+    document.getElementById('enqueue').onclick = () => {
+      const mode = document.getElementById('mode').value;
+      const token = localStorage.getItem('anon_token') || null;
+      // build profile and optional filters
+      const profile = {};
+      const g = document.getElementById('profileGender').value;
+      if(g && g !== 'any') profile.gender = g;
+      const a = document.getElementById('profileAge').value; if(a) profile.age = parseInt(a);
+      const loc = document.getElementById('profileLocation').value; if(loc) profile.location = loc;
+      const useFilters = document.getElementById('useFilters').checked;
+      const payload = { action: 'enqueue', mode, token, profile };
+      if(useFilters){ payload.filters = { gender: document.getElementById('profileGender').value, age_min: null, age_max: null, location: document.getElementById('profileLocation').value }; }
+      // Attempt to detect location automatically if not provided
+      if(!profile.location && navigator.geolocation){
+        navigator.geolocation.getCurrentPosition(function(pos){
+          // simple lat/lon string - server or UI can map as needed
+          profile.location = pos.coords.latitude.toFixed(4) + ',' + pos.coords.longitude.toFixed(4);
+          payload.profile = profile;
+          if(useFilters) payload.filters.location = profile.location;
+          ws.send(JSON.stringify(payload));
+          log('Enqueued: ' + mode + (useFilters ? ' (with filters)' : '') + ' (location detected)');
+        }, function(err){
+          // if geolocation blocked, fall back to whatever user entered (if any)
+          ws.send(JSON.stringify(payload));
+          log('Enqueued: ' + mode + (useFilters ? ' (with filters)' : '') + ' (no location)');
+        }, { timeout: 5000 });
+      } else {
+        ws.send(JSON.stringify(payload));
+        log('Enqueued: ' + mode + (useFilters ? ' (with filters)' : ''));
+      }
+      document.getElementById('hangup').disabled = false;
+    };
+    document.getElementById('hangup').onclick = async () => {
+      const sessionId = unblurBtn.dataset.session;
+      const token = localStorage.getItem('anon_token') || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      // If we have an active session, ask server whether an ad is required before Next
+      if (sessionId) {
+        try {
+          const resp = await fetch('/api/v1/sessions/' + sessionId + '/next/', { method: 'POST', headers });
+          const body = await resp.json();
+          if (body && body.action === 'ad_required') {
+            // show ad modal, require playback, then notify server and proceed
+            await playMockAd(sessionId, headers);
+          }
+        } catch (e) {
+          log('Next-check failed: ' + e + ' — proceeding');
+        }
+      }
+
+      if (pc) pc.close(); pc = null;
+      // notify via websocket to find next peer
+      if (ws) ws.send(JSON.stringify({ action: 'next' }));
+      log('Hung up');
+      document.getElementById('enqueue').disabled = false; unblurBtn.disabled = true;
+    };
+
+    async function startWebRTC(a, b){
+      const initiator = a < b; pc = new RTCPeerConnection(getIceServers());
+      pc.onicecandidate = (e)=>{ if(e.candidate) ws.send(JSON.stringify({ action:'signal', peer:b, payload:{ type:'ice', candidate:e.candidate }})); };
+      pc.ontrack = (e)=>{ document.getElementById('remoteVideo').srcObject = e.streams[0]; };
+      try{ localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true }); document.getElementById('localVideo').srcObject = localStream; for(const t of localStream.getTracks()) pc.addTrack(t, localStream); }catch(e){ log('Camera error: '+e); return }
+      if (initiator){ const offer = await pc.createOffer(); await pc.setLocalDescription(offer); ws.send(JSON.stringify({ action:'signal', peer:b, payload:{ type:'sdp', sdp:offer.sdp, sdpType:offer.type }})); }
+    }
+
+    async function handleSignal(from,payload){ if(!pc){ await startWebRTC(myId, peerId); } if(payload.type==='sdp'){ const desc={type:payload.sdpType||'offer',sdp:payload.sdp}; await pc.setRemoteDescription(desc); if(desc.type==='offer'){ const answer=await pc.createAnswer(); await pc.setLocalDescription(answer); ws.send(JSON.stringify({ action:'signal', peer:from, payload:{ type:'sdp', sdp:answer.sdp, sdpType:answer.type }})); }} else if(payload.type==='ice'){ try{ await pc.addIceCandidate(payload.candidate); }catch(e){ log('ICE err '+e) }} }
+
+    // unblur flow
+    unblurBtn.onclick = async () => {
+      const sessionId = unblurBtn.dataset.session; if(!sessionId) return; const token = localStorage.getItem('anon_token') || '';
+      const headers = { 'Content-Type':'application/json' }; if(token) headers['Authorization']='Bearer '+token;
+      try{
+        const resp = await fetch('/api/v1/sessions/' + sessionId + '/unblur/', { method:'POST', headers });
+        const body = await resp.json();
+        if(resp.status===200){ log('Unblur successful'); document.getElementById('remoteOverlay').classList.remove('blurred'); unblurBtn.disabled = true; await refreshBalance(); }
+  else if(resp.status===402){ log('Not enough coins'); if(body && body.checkout_url && autoBuyChk.checked){ showCheckoutModal(body.order_id, body.checkout_url, async ()=>{ await refreshBalance(); // try again
+    const r2 = await fetch('/api/v1/sessions/' + sessionId + '/unblur/', { method:'POST', headers }); if(r2.status===200){ document.getElementById('remoteOverlay').classList.remove('blurred'); unblurBtn.disabled = true; log('Unblur after purchase successful'); } }); } }
+        else log('Unblur failed: ' + (body && body.message));
+      }catch(e){ log('Unblur request failed: '+e); }
+    };
+
+    // purchase helpers
+    document.getElementById('buyCoinsBtn').onclick = async ()=>{
+      const token = localStorage.getItem('anon_token') || ''; const headers={'Content-Type':'application/json'}; if(token) headers['Authorization']='Bearer '+token;
+      const resp = await fetch('/api/v1/coins/purchase', { method:'POST', headers, body: JSON.stringify({ pack_id:'starter' }) }); const body = await resp.json(); if(resp.status===200 && body.checkout_url){ window.open(body.checkout_url,'_blank'); pollOrder(body.order_id, refreshBalance); }
+    };
+
+    document.getElementById('goPremiumBtn').onclick = async ()=>{
+      const token = localStorage.getItem('anon_token') || ''; const headers={'Content-Type':'application/json'}; if(token) headers['Authorization']='Bearer '+token;
+      const resp = await fetch('/api/v1/premium/purchase', { method:'POST', headers, body: JSON.stringify({}) });
+      const body = await resp.json();
+      if(resp.status===200 && body.checkout_url){ showCheckoutModal(body.order_id, body.checkout_url, async ()=>{ await refreshBalance(); showToast('Premium activated'); }); }
+    };
+
+    // Replace tab-based open with modal
+    function showCheckoutModal(orderId, url, onPaid){
+      const modal = document.getElementById('checkoutModal');
+      const iframe = document.getElementById('checkoutIframe');
+      const paidBtn = document.getElementById('checkoutPaidBtn');
+      const closeBtn = document.getElementById('checkoutClose');
+      modal.style.display = 'flex';
+      iframe.src = url;
+      // listen for messages from mock checkout (it will postMessage when payment completes)
+      function onMessage(e){
+        try{
+          const d = e.data || {};
+          if(d && d.type === 'order_paid' && String(d.order_id) === String(orderId)){
+            // poll and close modal when server reports paid
+            pollOrder(orderId, () => { if(onPaid) onPaid(); closeCheckoutModal(); showToast('Purchase completed'); });
+          }
+        }catch(err){ /* ignore */ }
+      }
+      window.addEventListener('message', onMessage);
+
+      // detect if framing is blocked: try to access contentWindow on load
+      let framedOk = true;
+      const onload = () => {
+        try {
+          // accessing location.href on cross-origin will throw if the browser blocked framing or if cross-origin access is not allowed
+          void iframe.contentWindow.location.href;
+          framedOk = true;
+        } catch (e) {
+          framedOk = false;
+        }
+        if (!framedOk) {
+          // fallback: open new tab and inform user
+          window.open(url, '_blank');
+          showToast('Checkout opened in a new tab (provider blocks framing).');
+          // hide modal since iframe cannot show provider
+          closeCheckoutModal();
+        }
+      };
+      iframe.onload = onload;
+
+      function handlePaid(){
+        // Prefer webhook-driven UI updates; this is a manual verify flow for demo
+        pollOrder(orderId, () => { if(onPaid) onPaid(); closeCheckoutModal(); showToast('Purchase completed'); });
+      }
+      paidBtn.onclick = handlePaid;
+      closeBtn.onclick = () => { window.removeEventListener('message', onMessage); closeCheckoutModal(); };
+    }
+    function closeCheckoutModal(){ const modal = document.getElementById('checkoutModal'); const iframe = document.getElementById('checkoutIframe'); modal.style.display='none'; iframe.src='about:blank'; }
+
+    // Patch buyCoinsBtn behavior to use modal
+    (function(){ const orig = document.getElementById('buyCoinsBtn').onclick; document.getElementById('buyCoinsBtn').onclick = async function(){ const token = localStorage.getItem('anon_token') || ''; const headers={'Content-Type':'application/json'}; if(token) headers['Authorization']='Bearer '+token; const resp = await fetch('/api/v1/coins/purchase', { method:'POST', headers, body: JSON.stringify({ pack_id:'starter' }) }); const body = await resp.json(); if(resp.status===200 && body.checkout_url){ showCheckoutModal(body.order_id, body.checkout_url, refreshBalance); } } })();
+
+    function pollOrder(orderId, onPaid){ const poll = async ()=>{ try{ const r = await fetch('/api/v1/coins/order/' + orderId + '/status'); const b = await r.json(); if(b && b.paid){ log('Order paid: '+orderId); if(onPaid) onPaid(); } else setTimeout(poll,2000); }catch(e){ setTimeout(poll,2000); }}; setTimeout(poll,2000); }
+
+    async function refreshBalance(){ const token = localStorage.getItem('anon_token') || ''; if(!token){ balanceLabel.textContent='Balance: (login)'; return; } try{ const resp = await fetch('/api/v1/wallet', { headers:{ 'Authorization':'Bearer '+token }}); if(resp.ok){ const b = await resp.json(); balanceLabel.textContent = 'Balance: ' + (b.coins || 0) + ' coins'; } }catch(e){}
+    }
+
+    async function updatePrefs(){ const token = localStorage.getItem('anon_token') || ''; if(!token) return; try{ await fetch('/api/v1/auth/preferences', { method:'PATCH', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token }, body: JSON.stringify({ auto_unblur: autoUnblurChk.checked, auto_buy_coins: autoBuyChk.checked }) }); }catch(e){}
+    }
+
+    // sync small UI actions
+    document.getElementById('debugBtn').onclick = ()=>{ alert('session: ' + (unblurBtn.dataset.session || '(none)')); };
+    document.getElementById('refreshBalanceSmall').onclick = refreshBalance;
+
+    // initial sync
+    refreshBalance();
+
+    // --- Mock ad playback helpers ---
+    function cancelAd(){ const m=document.getElementById('adModal'); m.style.display='none'; }
+    async function playMockAd(sessionId, headers){
+      return new Promise((resolve)=>{
+        const modal = document.getElementById('adModal');
+        const counter = document.getElementById('adCounter');
+        const skipBtn = document.getElementById('skipAdBtn');
+        modal.style.display='flex';
+        let t = 15; counter.textContent = 'Ad ends in ' + t + 's';
+        skipBtn.disabled = true;
+        const iv = setInterval(()=>{ t -= 1; counter.textContent = 'Ad ends in ' + t + 's'; if(t<=5){ skipBtn.disabled = false; } if(t<=0){ clearInterval(iv); finish(); } }, 1000);
+        const finish = async ()=>{
+          modal.style.display='none';
+          // notify server ad watched
+          try{ await fetch('/api/v1/sessions/' + sessionId + '/next/ad_watched/', { method:'POST', headers }); }catch(e){ /* ignore */ }
+          resolve();
+        };
+        skipBtn.onclick = ()=>{ clearInterval(iv); finish(); };
+      });
+    }
+  </script>
+  </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+[Unit]
+Description=Connectwell Django ASGI application
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+EnvironmentFile=/etc/connectwell.env
+WorkingDirectory=/srv/connectwell/backend
+# Ensure the virtualenv or path to daphne is correct in your deploy
+ExecStart=/srv/connectwell/.venv/bin/daphne -b 0.0.0.0 -p 8000 connectwell.asgi:application
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

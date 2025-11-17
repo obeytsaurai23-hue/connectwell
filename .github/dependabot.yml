@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "direct"
+    # security-only updates will still be raised immediately by Dependabot alerts
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:30"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "helm"
+    directory: "/charts/connectwell"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:30"
+    open-pull-requests-limit: 5
+
+# Automatically merge patch updates (safe, low-risk) when CI passes.
+automerged_updates:
+  # Automatically merge security fixes and patch version updates
+  security: true
+  merge_type: "semver:patch"
+  commit_message:
+    prefix: "chore(deps):"

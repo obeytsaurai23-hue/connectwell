@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connectwell — Start Chatting</title>
+  <link rel="stylesheet" href="/demo/style.css">
+  <style>
+    /* small landing overrides to keep the page lightweight */
+    body { background:linear-gradient(180deg,#071027 0%, #071b2a 60%); }
+    .container{max-width:720px;margin:0 auto;padding:20px}
+    .hero{text-align:center;padding:28px 12px}
+    .cta{background:linear-gradient(90deg,var(--accent),#4ade80);color:#062018;padding:12px 18px;border-radius:10px;display:inline-block;text-decoration:none}
+    table{width:100%;border-collapse:collapse;margin-top:18px}
+    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:left}
+    .login{margin-top:18px;display:flex;gap:8px;align-items:center}
+    .link{color:var(--accent);text-decoration:underline}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <h1>Connectwell</h1>
+      <p>Anonymous, safe, fun — random video & text chat, mobile-first.</p>
+      <a class="cta" href="/lobby.html">Start Chatting Now</a>
+      <div class="login">
+        <button id="emailBtn">Log in with Email (PIN)</button>
+        <a class="link" href="#anon" id="anonLink">Continue without Login</a>
+        &nbsp; • &nbsp;<a class="link" href="/login.html">Sign in</a>
+      </div>
+    </div>
+
+    <h3>Feature comparison</h3>
+    <table>
+      <thead><tr><th>Feature</th><th>Quick Chat</th><th>Verified</th></tr></thead>
+      <tbody>
+        <tr><td>Text & Video Chat</td><td>✅</td><td>✅</td></tr>
+        <tr><td>Unlimited "Next"</td><td>✅ (ads)</td><td>✅ (no ads)</td></tr>
+        <tr><td>Video Blurred</td><td>✅</td><td>✅ (can unblur)</td></tr>
+        <tr><td>Gender/Location Filters</td><td>❌</td><td>✅ (with coins)</td></tr>
+        <tr><td>Buy Coins / Premium</td><td>❌</td><td>✅</td></tr>
+      </tbody>
+    </table>
+
+    <section id="start">
+      <h3>How to start</h3>
+      <ol>
+        <li>Click "Start Chatting Now" to begin anonymously or log in with Email + PIN.</li>
+        <li>Choose Video or Text, add interests, and wait for a match.</li>
+        <li>Use "Next" to skip; free users see an ad after 3 skips per session.</li>
+      </ol>
+    </section>
+
+  </div>
+  <script>
+    // Minimal client behavior sketch
+    document.getElementById('emailBtn').addEventListener('click', ()=>{
+      const email = prompt('Enter your email to receive a 4-digit PIN:');
+      if(!email) return;
+      fetch('/api/v1/auth/send_pin', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email})})
+        .then(r=>r.json()).then(j=>alert(j.message || 'PIN sent'))
+    })
+    document.getElementById('anonLink').addEventListener('click',(e)=>{
+      e.preventDefault();
+      fetch('/api/v1/auth/continue_anonymous', {method:'POST'})
+        .then(r=>r.json()).then(j=>{ localStorage.setItem('anon_token', j.token); window.location.href='/lobby.html' })
+    })
+  </script>
+</body>
+</html>
